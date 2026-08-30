@@ -19,7 +19,13 @@ docker compose up --build
 ```
 
 - **http://localhost:8090** — the board
-- **http://localhost:8091/api/readyz** — API health: `{"ok":true,"db":true,"cache":true}`
+- **http://localhost:8091/api/readyz** — API health:
+  `{"ok":true,"db":true,"cache":true,"persistence":true}`
+
+`db` and `cache` report `"not_configured"` rather than `false` when the variable
+is absent — absent is not the same as unreachable. The board works without
+either: the solver is deterministic, so a plan is rebuilt from its id when there
+is no database. You lose the ledger and move persistence, nothing else.
 
 The API applies its migrations on boot, so there is no separate setup step.
 
@@ -150,14 +156,28 @@ Note it names the **knock-on** effect too, not just the first rule.
 
 ### Bonus
 
-- **Emergency job mid-day** — `POST /plans/:id/emergency` replans only the stops
-  that have not started. An infeasible emergency lands in unassigned with its
-  rule; it is never silently dropped.
-- **Technician calls in sick** — `POST /plans/:id/sick` keeps their completed
-  work and redistributes the rest. Anything that cannot be rehomed drops into
-  unassigned with a reason.
+All three have a UI, not just an endpoint.
+
+- **Emergency job mid-day** — the *Emergency job* button. Area, skill and
+  duration come from the live case; the form warns before you submit if the
+  window is shorter than the job. Jobs already under way stay put. An infeasible
+  emergency lands in unassigned with its rule, never dropped. The job is stored
+  with the plan, so it still exists on the next request.
+  `POST /plans/:id/emergency`
+- **Technician calls in sick** — the *Technician off* button. Before you commit
+  it says exactly what moves: what they keep, and which jobs need a new home,
+  by id and time. `POST /plans/:id/sick`
 - **Plan score and comparison** — every plan carries assigned, travel, idle,
-  tightest slack, coverage and a single score; `POST /plans/compare` diffs two.
+  tightest slack, coverage and a score. Once you drag anything, a *Your plan vs
+  the generated one* table appears and marks in red whatever your edits made
+  worse against the stated goal. `POST /plans/compare`
+
+### On a phone
+
+Below 900px the timeline becomes a per-technician agenda — a 12-hour axis is
+unreadable at 390px. Travel and idle stay visible as their own rows, because
+that waste is what the board exists to show. Press and hold to move a job; the
+ledger becomes a button in the bottom corner.
 
 ---
 
@@ -196,6 +216,8 @@ Formatting happens only in the UI.
   used directionally, with a warning in the ledger, rather than "corrected".
 - No auth, single dispatcher. Concurrent edits are caught by plan `version`
   (`409 STALE_PLAN`), not prevented.
+- The phone layout is built and type-checked but has not been reviewed on a real
+  device; spacing and touch targets may need tuning.
 - `web/src/mocks/planner.ts` is a browser fixture for offline demos. It is not
   the rule engine and is not in the default path.
 
@@ -204,9 +226,27 @@ Formatting happens only in the UI.
 ## Repository
 
 ```
-server/          Express monolith — domain, rules, solver, store, cache, API
-  test/          golden.test.js (25 public cases) · edge.test.js (our own)
-web/             React board — timeline, ledger, insight panels
+server/src/
+  domain.js      minute arithmetic and the single route walk — no I/O
+  rules.js       THE hard-rule engine; every caller goes through it
+  solver.js      multi-start greedy, local search, moves, replanning
+  validate.js    request-body validation, so a 400 names the field
+  cases.js       ingest and validation of the 25 cases
+  store.js       the only module that knows SQL
+  cache.js       Upstash, read-through and always optional
+  app.js         HTTP surface
+server/migrations/   001 schema · 002 emergency jobs
+server/test/         golden (25 cases) · edge (our own) · api (over HTTP)
+
+web/src/components/
+  Timeline.tsx   the desktop board
+  Agenda.tsx     the phone layout
+  Panels.tsx     metrics, unassigned list, job drawer
+  Disruptions.tsx  emergency and sick sheets
+  Insights.tsx   meters, composition, failure breakdown, comparisons
+  Ledger.tsx     the rule ledger
+  ErrorBoundary.tsx
+
 api/index.js     Vercel entry: exports the same Express app
 instructions/    Problem statement, sample data, planning docs (gitignored)
 ```

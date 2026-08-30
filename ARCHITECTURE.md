@@ -37,6 +37,7 @@ flowchart TB
 
     subgraph api["Express monolith :8080 → :8091"]
         A["app.js — HTTP surface"]
+        VD["validate.js — body validation"]
         SOL["solver.js — greedy + local search"]
         RUL["rules.js — the engine"]
         DOM["domain.js — minute arithmetic"]
@@ -50,6 +51,7 @@ flowchart TB
 
     UI --> ST
     UI --> PX --> A
+    A --> VD
     A --> SOL --> RUL --> DOM
     A --> CAS
     A --> CA --> RD
@@ -163,6 +165,7 @@ erDiagram
         jsonb score
         jsonb routes
         jsonb unassigned
+        jsonb extra_jobs "emergency jobs created on this plan"
     }
     plan_events {
         bigserial id PK
@@ -177,6 +180,12 @@ erDiagram
 The 25 cases are read-only reference data, embedded in the image and validated at
 ingest — there is nothing to migrate and nothing to keep in sync. Only *plans*
 and *what happened to them* are persisted.
+
+`extra_jobs` exists because an emergency job is created at runtime and belongs to
+one plan. Without storing it, the job vanished from the case on the next request
+and any later operation on it failed with "not in this case". Every handler now
+resolves its case through `caseFor(plan)` — the static case plus that plan's own
+emergency jobs.
 
 `plan_events` is append-only and is the backing store for the Rule Ledger in the
 UI. `version` gives optimistic concurrency: a `move` carrying a stale version
@@ -213,6 +222,20 @@ flowchart LR
 The same Express app runs in both places. Docker adds the listener and boot
 migrations; Vercel imports the app directly.
 
+## Degrading without a database or cache
+
+Neither dependency is required to use the board.
+
+| Missing | Effect |
+|---|---|
+| Redis | Slower; every read-through path computes the value instead. |
+| Postgres | Plans are rebuilt from their id — the solver is deterministic, so this is exact. The ledger and move persistence are lost. |
+
+`store.js` builds its pool lazily and importing it never throws, so a missing
+`DATABASE_URL` cannot take down endpoints that need no database. `/api/readyz`
+reports `"not_configured"` rather than `false`, because absent is not the same as
+unreachable.
+
 ## Frontend
 
 The board's visual encoding *is* its argument: **service is solid, travel is
@@ -228,6 +251,15 @@ The **Rule Ledger** is the signature element: an append-only right rail reading
 from `plan_events`, which doubles as a live verdict preview during a drag. It is
 *"silence is not an answer"* made literal — nothing happens on this board without
 a written reason.
+
+Below 900px the timeline is replaced by a per-technician agenda: a 12-hour axis
+collapses every block to a sliver on a phone, so the encoding moves from width to
+sequence, and travel and idle keep their own rows. Only one layout mounts at a
+time — rendering both would give dnd-kit duplicate draggable ids.
+
+A render crash is caught by an error boundary. A dispatcher losing the board
+mid-shift with no explanation is the worst failure mode here, so it states what
+happened and offers a way back rather than showing a blank page.
 
 ## Known limitations
 

@@ -63,19 +63,19 @@
       "id": "B1",
       "requirement": "Emergency job mid-day, replanning only jobs not yet started",
       "met": true,
-      "where": "POST /api/plans/:id/emergency"
+      "where": "POST /api/plans/:id/emergency; UI: web/src/components/Disruptions.tsx (Emergency job button)"
     },
     {
       "id": "B2",
       "requirement": "Technician calls in sick, redistributing their remaining jobs",
       "met": true,
-      "where": "POST /api/plans/:id/sick"
+      "where": "POST /api/plans/:id/sick; UI: web/src/components/Disruptions.tsx (Technician off button)"
     },
     {
       "id": "B3",
       "requirement": "Plan score, and comparison of a manual plan against the generated one",
       "met": true,
-      "where": "score on every plan; POST /api/plans/compare; naive-baseline delta shown on the board"
+      "where": "score on every plan; POST /api/plans/compare; UI: Compare and Gain panels in web/src/components/Insights.tsx"
     }
   ],
   "assumptions": [
@@ -88,7 +88,8 @@
     "Overnight shifts (shift_end <= shift_start) are rejected with INVALID_SHIFT and the technician is excluded, rather than wrapped past midnight.",
     "Local search is relocate-only within a time budget; swap and 2-opt are not implemented. On timeout the API returns the best plan found so far with partial: true.",
     "No authentication. Concurrent edits are detected by plan version (409 STALE_PLAN), not prevented.",
-    "web/src/mocks/planner.ts is a browser fixture for offline demos and is not the rule engine or the default path."
+    "web/src/mocks/planner.ts is a browser fixture for offline demos and is not the rule engine or the default path.",
+    "The phone layout below 900px is built and type-checked but has not been reviewed on a physical device."
   ],
   "secrets": "None committed. .env is gitignored; .env.example lists only the variables the app reads."
 }
