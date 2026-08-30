@@ -378,22 +378,18 @@ export function insertEmergency(cs, plan, job, fromTime) {
 
 export function markSick(cs, plan, techId, fromTime) {
   const { frozen, loose } = freeze(plan, fromTime)
-  const sickRemaining = (plan.routes.find((r) => r.technician_id === techId)?.stops ?? [])
-    .filter((s) => s.start >= fromTime)
-    .map((s) => s.job_id)
-  frozen.set(techId, (frozen.get(techId) ?? []).slice())
 
-  // Take the sick technician out of the running for anything not yet started.
-  const shrunk = { ...cs, technicians: cs.technicians.filter((t) => t.id !== techId) }
-  const next = replan(shrunk, frozen, loose, [...plan.unassigned], plan.version + 1, plan.id)
-
-  // Keep the sick technician visible with only their completed work.
+  // Everything the sick technician had not started joins the pool to rehome;
+  // what they already started stays on their row.
   const done = frozen.get(techId) ?? []
-  const jobs = new Map(cs.jobs.map((j) => [j.id, j]))
-  const tech = cs.technicians.find((t) => t.id === techId)
+  frozen.set(techId, [])
+
+  // Replan without them, so nothing new is given to someone who has gone home.
+  const available = { ...cs, technicians: cs.technicians.filter((t) => t.id !== techId) }
+  const next = replan(available, frozen, loose, [...plan.unassigned], plan.version + 1, plan.id)
+
+  // Then put their completed work back on the board — it happened.
   const order = planOrder(next)
   order.set(techId, done)
-  void jobs
-  void sickRemaining
-  return materialise(cs, order, next.unassigned, { version: plan.version + 1, id: plan.id, partial: !tech })
+  return materialise(cs, order, next.unassigned, { version: plan.version + 1, id: plan.id })
 }

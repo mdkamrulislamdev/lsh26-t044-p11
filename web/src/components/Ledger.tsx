@@ -44,7 +44,7 @@ function Entry({ e, preview }: { e: PlanEvent; preview?: boolean }) {
 
 export function Ledger({ events, preview }: { events: PlanEvent[]; preview: PlanEvent | null }) {
   return (
-    <aside className="flex h-full min-h-0 w-[300px] shrink-0 flex-col border-l border-rule bg-paper">
+    <aside className="flex h-full min-h-0 w-[300px] max-w-[85vw] shrink-0 flex-col border-l border-rule bg-paper">
       <header className="border-b border-rule px-4 py-3">
         <h2 className="eyebrow">Rule ledger</h2>
         <p className="mt-1 text-[12px] leading-[16px] text-muted">

@@ -15,9 +15,12 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { api } from './api/client'
 import type { Plan, PlanEvent, Violation } from './api/types'
 import { Board } from './components/Timeline'
+import { Agenda } from './components/Agenda'
+import { useMediaQuery } from './lib/useMediaQuery'
 import { Ledger } from './components/Ledger'
 import { JobDrawer, MetricStrip, Unassigned } from './components/Panels'
-import { Composition, Failures, Gain } from './components/Insights'
+import { Compare, Composition, Failures, Gain } from './components/Insights'
+import { EmergencySheet, SickSheet } from './components/Disruptions'
 import { longDate } from './lib/time'
 
 let seq = 0
@@ -37,6 +40,12 @@ export default function App() {
   const [offending, setOffending] = useState<Set<string>>(new Set())
   const [openJob, setOpenJob] = useState<string | null>(null)
   const [baseline, setBaseline] = useState<Plan | null>(null)
+  // The plan as generated, kept so a hand-edited plan can be measured against it.
+  const [generated, setGenerated] = useState<Plan | null>(null)
+  const [sheet, setSheet] = useState<null | 'emergency' | 'sick'>(null)
+  const [busy, setBusy] = useState(false)
+  const [ledgerOpen, setLedgerOpen] = useState(false)
+  const phone = useMediaQuery('(max-width: 900px)')
   const debounce = useRef<number | undefined>(undefined)
 
   const cases = useQuery({ queryKey: ['cases'], queryFn: () => api.listCases() })
@@ -66,6 +75,7 @@ export default function App() {
     onSuccess: (p) => {
       setPlan(p)
       setOffending(new Set())
+      setGenerated(p)
       api.baseline(p).then(setBaseline).catch(() => setBaseline(null))
       refreshEvents(p.id)
       log({
@@ -78,6 +88,10 @@ export default function App() {
 
   // Regenerate whenever the case changes, so the board is never stale-but-plausible.
   useEffect(() => {
+    setPlan(null)
+    setBaseline(null)
+    setGenerated(null)
+    setEvents([])
     if (detail.data) generate.mutate()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail.data?.case_id])
@@ -162,6 +176,28 @@ export default function App() {
     }
   }
 
+  async function runDisruption(kind: 'emergency' | 'sick', body: Record<string, unknown>) {
+    if (!plan) return
+    setBusy(true)
+    try {
+      const next =
+        kind === 'emergency'
+          ? await api.emergency(plan, body)
+          : await api.sick(plan, body as { tech_id: string; from_time: string })
+      setPlan(next)
+      setSheet(null)
+      setOffending(new Set())
+      refreshEvents(next.id)
+    } catch (e) {
+      log({
+        kind: 'move_refused',
+        summary: (e as Error).message,
+      })
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const c = detail.data
 
   return (
@@ -199,10 +235,11 @@ export default function App() {
                 </option>
               ))}
             </select>
-            <label className="eyebrow" htmlFor="zoom">
+            <label className={`eyebrow ${phone ? 'hidden' : ''}`} htmlFor="zoom">
               Zoom
             </label>
             <input
+              className={phone ? 'hidden' : 'w-24'}
               id="zoom"
               type="range"
               min={0.8}
@@ -210,8 +247,21 @@ export default function App() {
               step={0.1}
               value={ppm}
               onChange={(e) => setPpm(Number(e.target.value))}
-              className="w-24"
             />
+            <button
+              onClick={() => setSheet('emergency')}
+              disabled={!plan}
+              className="border border-rule-strong px-3 py-2 text-[13px] font-medium disabled:opacity-40"
+            >
+              Emergency job
+            </button>
+            <button
+              onClick={() => setSheet('sick')}
+              disabled={!plan}
+              className="border border-rule-strong px-3 py-2 text-[13px] font-medium disabled:opacity-40"
+            >
+              Technician off
+            </button>
             <button
               onClick={() => generate.mutate()}
               disabled={generate.isPending}
@@ -221,7 +271,7 @@ export default function App() {
             </button>
           </div>
         </div>
-        {plan && (
+        {plan && plan.case_id === c?.case_id && (
           <div className="mt-4">
             <MetricStrip plan={plan} />
           </div>
@@ -230,19 +280,43 @@ export default function App() {
 
       <div className="flex min-h-0 flex-1">
         <main className="min-w-0 flex-1 overflow-y-auto p-5">
-          {detail.isError && (
-            <p className="border border-rule bg-paper p-4 text-[13px]">
-              Can't load the case file. Check that <span className="mono">cases.json</span> is
-              served.
-            </p>
+          {(detail.isError || cases.isError) && (
+            <section className="border border-rule bg-paper p-4">
+              <h2 className="eyebrow" style={{ color: 'var(--color-flag)' }}>
+                Can't reach the planner
+              </h2>
+              <p className="mt-2 text-[13px] leading-[19px]">
+                The board needs <span className="mono">/api/cases</span>, and that request failed.
+                The 25 cases ship inside the API, so this is the service being unavailable — not
+                missing data.
+              </p>
+              <p className="mono mt-2 text-[12px] text-muted">
+                {(cases.error as Error)?.message ?? (detail.error as Error)?.message}
+              </p>
+              <p className="mt-2 text-[13px]">
+                Check <span className="mono">/api/readyz</span>. Retry once it responds.
+              </p>
+              <button
+                onClick={() => {
+                  cases.refetch()
+                  detail.refetch()
+                }}
+                className="mt-3 bg-ink px-3 py-1.5 text-[13px] font-medium text-paper"
+              >
+                Try again
+              </button>
+            </section>
           )}
           {!c && !detail.isError && (
             <p className="text-[13px] text-muted">Loading cases…</p>
           )}
-          {c && !plan && (
+          {c && (!plan || plan.case_id !== c.case_id) && !generate.isPending && (
             <p className="text-[13px] text-muted">Pick a case and generate the day plan.</p>
           )}
-          {c && plan && (
+          {c && generate.isPending && (
+            <p className="text-[13px] text-muted">Building the day plan for {c.case_id}…</p>
+          )}
+          {c && plan && plan.case_id === c.case_id && (
             <DndContext
               sensors={sensors}
               collisionDetection={closestCenter}
@@ -253,19 +327,37 @@ export default function App() {
               <div className="mb-3 flex items-baseline gap-3">
                 <h2 className="eyebrow">Day plan</h2>
                 <p className="text-[12px] text-muted">
-                  Solid is service, hatched is travel, bare board is idle. Drag a job onto another
-                  technician, or focus one and press Enter.
+                  {phone
+                    ? 'Each technician in order, with travel and idle between jobs. Press and hold a job to move it.'
+                    : 'Solid is service, hatched is travel, bare board is idle. Drag a job onto another technician, or focus one and press Enter.'}
                 </p>
               </div>
-              <Board
-                c={c}
-                plan={plan}
-                ppm={ppm}
-                hoverTech={hoverTech}
-                verdictOk={verdictOk}
-                offending={offending}
-                onOpenJob={setOpenJob}
-              />
+              {c.technicians.length === 0 && (
+                <p className="border border-rule bg-paper p-4 text-[13px]">
+                  This case has no technicians on shift, so nothing can be assigned. Every job is
+                  listed below with its reason.
+                </p>
+              )}
+              {phone ? (
+                <Agenda
+                  c={c}
+                  plan={plan}
+                  hoverTech={hoverTech}
+                  verdictOk={verdictOk}
+                  offending={offending}
+                  onOpenJob={setOpenJob}
+                />
+              ) : (
+                <Board
+                  c={c}
+                  plan={plan}
+                  ppm={ppm}
+                  hoverTech={hoverTech}
+                  verdictOk={verdictOk}
+                  offending={offending}
+                  onOpenJob={setOpenJob}
+                />
+              )}
               <DragOverlay dropAnimation={null}>
                 {dragJob && (
                   <div
@@ -301,14 +393,59 @@ export default function App() {
                 <Failures items={plan.unassigned} />
                 {baseline && <Gain plan={plan} baseline={baseline} />}
               </div>
+              {generated && generated.version !== plan.version && (
+                <div className="mt-5">
+                  <Compare current={plan} generated={generated} />
+                </div>
+              )}
               <div className="mt-5">
                 <Unassigned items={plan.unassigned} jobs={jobs} />
               </div>
             </DndContext>
           )}
         </main>
-        <Ledger events={events} preview={preview} />
+        {!phone && <Ledger events={events} preview={preview} />}
       </div>
+
+      {phone && (
+        <>
+          <button
+            onClick={() => setLedgerOpen(true)}
+            className="fixed right-4 bottom-4 z-40 bg-ink px-4 py-3 text-[13px] font-medium text-paper shadow-lg"
+          >
+            Ledger{events.length ? ` · ${events.length}` : ''}
+          </button>
+          {ledgerOpen && (
+            <div
+              className="fixed inset-0 z-50 flex justify-end bg-ink/25"
+              onClick={() => setLedgerOpen(false)}
+            >
+              <div className="h-full" onClick={(e) => e.stopPropagation()}>
+                <Ledger events={events} preview={preview} />
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {sheet === 'emergency' && c && plan && (
+        <EmergencySheet
+          c={c}
+          plan={plan}
+          busy={busy}
+          onClose={() => setSheet(null)}
+          onSubmit={(body) => runDisruption('emergency', body)}
+        />
+      )}
+      {sheet === 'sick' && c && plan && (
+        <SickSheet
+          c={c}
+          plan={plan}
+          busy={busy}
+          onClose={() => setSheet(null)}
+          onSubmit={(body) => runDisruption('sick', body)}
+        />
+      )}
 
       {openJob && c && plan && jobs.get(openJob) && (
         <JobDrawer job={jobs.get(openJob)!} c={c} plan={plan} onClose={() => setOpenJob(null)} />

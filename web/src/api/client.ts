@@ -79,8 +79,41 @@ export const api = {
       body: JSON.stringify({ job_id: jobId, to_technician: toTech, version: plan.version }),
     })
     const body = await res.json()
-    if (res.ok || res.status === 409) return { plan: body.plan ?? plan, verdict: body.verdict }
+    if (res.ok) return { plan: body.plan, verdict: body.verdict }
+    if (res.status === 409) {
+      // Two shapes arrive as 409: a rule refusal (carries a verdict) and a
+      // stale-version conflict (carries only the current plan). Normalise both
+      // so callers never touch an undefined verdict.
+      return {
+        plan: body.plan ?? plan,
+        verdict: body.verdict ?? {
+          ok: false,
+          violations: body.error?.violations ?? [
+            {
+              code: body.error?.code ?? 'REFUSED',
+              job_id: jobId,
+              tech_id: toTech,
+              message: body.error?.message ?? 'The move was refused.',
+            },
+          ],
+        },
+      }
+    }
     throw new Error(body?.error?.message ?? `Move failed (${res.status}).`)
+  },
+
+  async emergency(plan: Plan, body: Record<string, unknown>): Promise<Plan> {
+    if (USE_MOCK) throw new Error('Emergency replanning needs the API.')
+    return json(`/plans/${plan.id}/emergency`, { method: 'POST', body: JSON.stringify(body) })
+  },
+
+  async sick(plan: Plan, body: { tech_id: string; from_time: string }): Promise<Plan> {
+    if (USE_MOCK) throw new Error('Sick redistribution needs the API.')
+    return json(`/plans/${plan.id}/sick`, { method: 'POST', body: JSON.stringify(body) })
+  },
+
+  async version(): Promise<{ solver_version: string; commit: string; cache: Record<string, unknown> }> {
+    return json('/version')
   },
 
   async events(planId: string): Promise<PlanEvent[]> {

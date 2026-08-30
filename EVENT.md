@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Team ID** | `LSH26-T###` <!-- FILL IN: your team number, lowercase in the repo name --> |
+| **Team ID** | `LSH26-T044` |
 | **Problem ID** | `P11` — Route and Shift Assignment Optimiser |
 | **Event start code** | `LSH26-8490-C900` |
 

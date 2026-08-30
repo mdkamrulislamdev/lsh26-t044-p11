@@ -1,0 +1,19 @@
+{
+  "name": "lsh26-p11-dispatch-board",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "migrate": "node server/src/migrate.js",
+    "test": "cd server && node --test --test-reporter=spec"
+  },
+  "comment": "Vercel installs from this file for the api/ function. It must carry the server's runtime dependencies — server/package.json is not seen by the build.",
+  "dependencies": {
+    "@upstash/redis": "^1.34.3",
+    "compression": "^1.7.5",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "pg": "^8.13.1"
+  }
+}

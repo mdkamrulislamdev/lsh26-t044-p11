@@ -1,6 +1,6 @@
 # Dispatch Board — Route & Shift Assignment Optimiser
 
-**Problem:** P11 · **Team:** `LSH26-T###` *(fill in)* · **Live URL:** *(fill in)*
+**Problem:** P11 · **Team:** `LSH26-T044` · **Live:** https://p2-rho-jet.vercel.app/
 
 A dispatcher's day-plan tool for a home-service company in Dhaka. It builds the
 morning plan across 12+ technicians, refuses anything that breaks a hard rule and
@@ -19,24 +19,42 @@ docker compose up --build
 ```
 
 - **http://localhost:8090** — the board
-- **http://localhost:8091/api/readyz** — API health: `{"ok":true,"db":true,"cache":true}`
+- **http://localhost:8091/api/readyz** — API health:
+  `{"ok":true,"db":true,"cache":true,"persistence":true}`
+
+`db` and `cache` report `"not_configured"` rather than `false` when the variable
+is absent — absent is not the same as unreachable. The board works without
+either: the solver is deterministic, so a plan is rebuilt from its id when there
+is no database. You lose the ledger and move persistence, nothing else.
 
 The API applies its migrations on boot, so there is no separate setup step.
 
 ### Run the tests
 
 ```bash
-docker compose run --rm test
+docker compose run --rm --build test
 ```
 
-**172 tests.** They need no database and no network — the rule engine and solver
-are pure, so this runs offline and in CI. Add `-e FORCE_COLOR=1` if your terminal
+**212 tests** across three suites. They need no database and no network — the
+rule engine, solver and HTTP layer are all exercised in-process — so this runs
+offline and in CI.
+
+Keep the `--build`. Without it Compose reuses the image from the last build and
+silently runs an older copy of the tests. Add `-e FORCE_COLOR=1` if your terminal
 strips the colour.
 
 ```bash
-docker compose run --rm test node --test --test-reporter=spec test/golden.test.js   # the 25 public cases
-docker compose run --rm test node --test --test-reporter=spec test/edge.test.js     # our own edge cases
-docker compose run --rm test node --test --test-name-pattern="manual move"          # one behaviour
+# the 25 public cases: feasibility, reasons, determinism, scripted moves
+docker compose run --rm --build test node --test --test-reporter=spec test/golden.test.js
+
+# our own cases: malformed input, degenerate shapes, replanning
+docker compose run --rm --build test node --test --test-reporter=spec test/edge.test.js
+
+# the API over HTTP: validation, 409s, emergency persistence, sick accounting
+docker compose run --rm --build test node --test --test-reporter=spec test/api.test.js
+
+# one behaviour by name
+docker compose run --rm --build test node --test --test-name-pattern="manual move"
 ```
 
 ### Frontend with hot reload
@@ -81,7 +99,7 @@ Full diagrams and the reasoning behind the structure: **[ARCHITECTURE.md](./ARCH
 skills, shift windows, home areas, and the authoritative area-to-area travel
 table. Validated at ingest; nothing is hardcoded to a case size.
 
-> `docker compose run --rm test node --test --test-name-pattern="brief minimums"`
+> `docker compose run --rm --build test node --test --test-name-pattern="brief minimums"`
 
 ### AT2 — assignment that respects the hard rules, and one stated goal
 
@@ -97,7 +115,7 @@ Every generated plan is checked against the same engine that built it, on all 25
 cases, and compared to a naive baseline (jobs in id order to the first technician
 who can legally take them). The board shows the delta.
 
-> `docker compose run --rm test node --test --test-name-pattern="feasible|beats the naive"`
+> `docker compose run --rm --build test node --test --test-name-pattern="feasible|beats the naive"`
 
 ### AT3 — the timeline, and the unassigned list
 
@@ -114,7 +132,7 @@ and 90 min does not fit before 15:00.
 
 Assigned + unassigned always accounts for every job, with no job in both.
 
-> `docker compose run --rm test node --test --test-name-pattern="silently dropped|planted"`
+> `docker compose run --rm --build test node --test --test-name-pattern="silently dropped|planted"`
 
 ### AT4 — the manual move
 
@@ -134,18 +152,64 @@ WINDOW_LATE    — Habib reaches Gulshan at 13:25, but J16 takes 1h 15m and must
 
 Note it names the **knock-on** effect too, not just the first rule.
 
-> `docker compose run --rm test node --test --test-name-pattern="scripted manual_move|never changes the plan|always agree"`
+> `docker compose run --rm --build test node --test --test-name-pattern="scripted manual_move|never changes the plan|always agree"`
 
 ### Bonus
 
-- **Emergency job mid-day** — `POST /plans/:id/emergency` replans only the stops
-  that have not started. An infeasible emergency lands in unassigned with its
-  rule; it is never silently dropped.
-- **Technician calls in sick** — `POST /plans/:id/sick` keeps their completed
-  work and redistributes the rest. Anything that cannot be rehomed drops into
-  unassigned with a reason.
+All three have a UI, not just an endpoint.
+
+- **Emergency job mid-day** — the *Emergency job* button. Area, skill and
+  duration come from the live case; the form warns before you submit if the
+  window is shorter than the job. Jobs already under way stay put. An infeasible
+  emergency lands in unassigned with its rule, never dropped. The job is stored
+  with the plan, so it still exists on the next request.
+  `POST /plans/:id/emergency`
+- **Technician calls in sick** — the *Technician off* button. Before you commit
+  it says exactly what moves: what they keep, and which jobs need a new home,
+  by id and time. `POST /plans/:id/sick`
 - **Plan score and comparison** — every plan carries assigned, travel, idle,
-  tightest slack, coverage and a single score; `POST /plans/compare` diffs two.
+  tightest slack, coverage and a score. Once you drag anything, a *Your plan vs
+  the generated one* table appears and marks in red whatever your edits made
+  worse against the stated goal. `POST /plans/compare`
+
+### On a phone
+
+Below 900px the timeline becomes a per-technician agenda — a 12-hour axis is
+unreadable at 390px. Travel and idle stay visible as their own rows, because
+that waste is what the board exists to show. Press and hold to move a job; the
+ledger becomes a button in the bottom corner.
+
+---
+
+## Approach
+
+The brief asks for a plan, but the sentence that shapes the design is the
+constraint: *"The unassigned jobs list with a reason for each one is required.
+Silence is not an answer."* A scheduler that quietly drops what it cannot place
+looks better in a screenshot and is useless to a dispatcher.
+
+The sample data confirms it. **All 25 public cases plant at least one job whose
+required skill no technician has**, 16 plant a job whose window is shorter than
+its own duration, and **19 of the 25 scripted `manual_move` entries send a job to
+a technician who lacks the skill** — the manual-move requirement is graded mostly
+on the refusal.
+
+So we built the explanation first and the optimiser second: one rule engine that
+every caller goes through, a structural pre-screen that separates "impossible
+today" from "no room left", and a board whose visual encoding is the objective
+function — idle time is the bare board showing through, so a wasteful plan reads
+as holes.
+
+### Contributions
+
+<!-- FILL IN: one line per registered member, naming what they owned. -->
+
+| Member | Major contribution |
+|---|---|
+| *(name)* | *(e.g. rule engine and solver — `server/src/rules.js`, `solver.js`)* |
+| *(name)* | *(e.g. board UI, timeline and drag interaction — `web/src/components/`)* |
+| *(name)* | *(e.g. persistence, caching, Docker and deploy)* |
+| *(name)* | *(e.g. test suites and the edge-case catalogue)* |
 
 ---
 
@@ -184,17 +248,43 @@ Formatting happens only in the UI.
   used directionally, with a warning in the ledger, rather than "corrected".
 - No auth, single dispatcher. Concurrent edits are caught by plan `version`
   (`409 STALE_PLAN`), not prevented.
+- The phone layout is built and type-checked but has not been reviewed on a real
+  device; spacing and touch targets may need tuning.
 - `web/src/mocks/planner.ts` is a browser fixture for offline demos. It is not
   the rule engine and is not in the default path.
 
 ---
 
+## Licence
+
+This project is MIT licensed — see [LICENSE](./LICENSE). Third-party
+attribution for every dependency, font and image is in
+[LICENSES.md](./LICENSES.md).
+
 ## Repository
 
 ```
-server/          Express monolith — domain, rules, solver, store, cache, API
-  test/          golden.test.js (25 public cases) · edge.test.js (our own)
-web/             React board — timeline, ledger, insight panels
+server/src/
+  domain.js      minute arithmetic and the single route walk — no I/O
+  rules.js       THE hard-rule engine; every caller goes through it
+  solver.js      multi-start greedy, local search, moves, replanning
+  validate.js    request-body validation, so a 400 names the field
+  cases.js       ingest and validation of the 25 cases
+  store.js       the only module that knows SQL
+  cache.js       Upstash, read-through and always optional
+  app.js         HTTP surface
+server/migrations/   001 schema · 002 emergency jobs
+server/test/         golden (25 cases) · edge (our own) · api (over HTTP)
+
+web/src/components/
+  Timeline.tsx   the desktop board
+  Agenda.tsx     the phone layout
+  Panels.tsx     metrics, unassigned list, job drawer
+  Disruptions.tsx  emergency and sick sheets
+  Insights.tsx   meters, composition, failure breakdown, comparisons
+  Ledger.tsx     the rule ledger
+  ErrorBoundary.tsx
+
 api/index.js     Vercel entry: exports the same Express app
 instructions/    Problem statement, sample data, planning docs (gitignored)
 ```

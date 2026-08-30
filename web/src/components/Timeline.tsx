@@ -12,9 +12,12 @@ interface Geometry {
 }
 
 export function geometry(c: CaseDetail, ppm: number): Geometry {
+  // An empty technician list would make Math.min/max return ±Infinity and the
+  // whole board would compute NaN widths. Fall back to a plain working day.
+  if (!c.technicians.length) return { from: 480, to: 1080, ppm }
   const from = Math.floor(Math.min(...c.technicians.map((t) => t.shift_start)) / 60) * 60
   const to = Math.ceil(Math.max(...c.technicians.map((t) => t.shift_end)) / 60) * 60
-  return { from, to, ppm }
+  return { from, to, ppm: ppm }
 }
 
 const x = (g: Geometry, t: number) => (t - g.from) * g.ppm
@@ -146,7 +149,7 @@ export function TechRow({
         <div className="mt-1.5">
           <Meter
             p={{
-              service: route.stops.reduce((a, s) => a + jobs.get(s.job_id)!.duration_minutes, 0),
+              service: route.stops.reduce((a, s) => a + (jobs.get(s.job_id)?.duration_minutes ?? 0), 0),
               travel: route.travel_minutes,
               idle: route.idle_minutes,
               capacity: tech.shift_end - tech.shift_start,
@@ -169,16 +172,20 @@ export function TechRow({
           className="absolute top-0 right-0 bottom-0 bg-smog opacity-70"
           style={{ width: w(g, g.to - tech.shift_end) }}
         />
-        {route.stops.map((s) => (
-          <JobBlock
-            key={s.job_id}
-            g={g}
-            stop={s}
-            job={jobs.get(s.job_id)!}
-            offending={offending.has(s.job_id)}
-            onOpen={() => onOpenJob(s.job_id)}
-          />
-        ))}
+        {route.stops.map((s) => {
+          const job = jobs.get(s.job_id)
+          if (!job) return null
+          return (
+            <JobBlock
+              key={s.job_id}
+              g={g}
+              stop={s}
+              job={job}
+              offending={offending.has(s.job_id)}
+              onOpen={() => onOpenJob(s.job_id)}
+            />
+          )
+        })}
         {route.stops.length === 0 && (
           <span className="absolute top-1/2 left-3 -translate-y-1/2 text-[12px] text-muted">
             No jobs assigned

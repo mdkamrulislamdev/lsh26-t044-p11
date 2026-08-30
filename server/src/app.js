@@ -10,7 +10,8 @@ import express from 'express'
 import { randomUUID } from 'node:crypto'
 import * as cache from './cache.js'
 import { getCase, summaries } from './cases.js'
-import { parseHHMM, ValidationError } from './domain.js'
+import { ValidationError } from './domain.js'
+import * as V from './validate.js'
 import * as store from './store.js'
 import {
   applyMove,
@@ -26,7 +27,7 @@ const CASE_TTL = 24 * 60 * 60
 const PLAN_TTL = 60 * 60
 const MOVE_TTL = 60
 
-export function createApp({ persist = true } = {}) {
+export function createApp({ persist = store.hasDatabase() } = {}) {
   const app = express()
   app.disable('x-powered-by')
   app.use(compression())
@@ -64,10 +65,30 @@ export function createApp({ persist = true } = {}) {
     return c
   }
 
+  // With a database, plans are loaded. Without one, the solver is deterministic,
+  // so a generated plan can be rebuilt exactly from its id — the board stays
+  // fully usable and only the ledger and manual-move persistence are lost.
+  // A plan's effective case is the static case plus any emergency jobs created
+  // on it. Without this, an emergency job stops existing on the next request.
+  const caseFor = (plan) => {
+    const cs = needCase(plan.case_id)
+    const extra = plan.extra_jobs ?? []
+    return extra.length ? { ...cs, jobs: [...cs.jobs, ...extra] } : cs
+  }
+
   const needPlan = async (id) => {
-    const p = persist ? await store.loadPlan(id) : null
-    if (!p) throw Object.assign(new Error(`Plan ${id} is not stored.`), { status: 404, code: 'NO_PLAN' })
-    return p
+    if (persist) {
+      const stored = await store.loadPlan(id).catch(() => null)
+      if (stored) return stored
+    }
+    const caseId = String(id).replace(new RegExp(`-${SOLVER_VERSION}$`), '')
+    const cs = getCase(caseId)
+    if (!cs)
+      throw Object.assign(new Error(`Plan ${id} is not stored and cannot be rebuilt.`), {
+        status: 404,
+        code: 'NO_PLAN',
+      })
+    return { ...solve(cs), extra_jobs: [] }
   }
 
   const logEvent = async (planId, kind, summary, detail, violations) => {
@@ -85,11 +106,15 @@ export function createApp({ persist = true } = {}) {
   app.get(
     '/api/readyz',
     wrap(async (_req, res) => {
+      // "not_configured" is not the same as "down". The board works without a
+      // database (deterministic rebuild) and without a cache, so neither being
+      // absent is a failure — an absent one being *unreachable* is.
       const [db, kv] = await Promise.all([
-        persist ? store.ping().catch(() => false) : Promise.resolve(true),
-        cache.ping(),
+        store.hasDatabase() ? store.ping().catch(() => false) : Promise.resolve('not_configured'),
+        cache.enabled() ? cache.ping() : Promise.resolve('not_configured'),
       ])
-      res.status(db ? 200 : 503).json({ ok: db, db, cache: kv })
+      const ok = db !== false
+      res.status(ok ? 200 : 503).json({ ok, db, cache: kv, persistence: persist })
     }),
   )
   app.get('/api/version', (_req, res) =>
@@ -118,7 +143,7 @@ export function createApp({ persist = true } = {}) {
   app.post(
     '/api/plans',
     wrap(async (req, res) => {
-      const caseId = String(req.body?.case_id ?? '')
+      const caseId = V.id(V.body(req), 'case_id')
       const cs = needCase(caseId)
       const plan = await cache.cached(cache.K.plan(caseId, SOLVER_VERSION), PLAN_TTL, () => solve(cs))
       if (persist) {
@@ -145,7 +170,7 @@ export function createApp({ persist = true } = {}) {
     '/api/plans/:id/baseline',
     wrap(async (req, res) => {
       const plan = await needPlan(req.params.id)
-      const cs = needCase(plan.case_id)
+      const cs = caseFor(plan)
       res.json(await cache.cached(`plan:base:${plan.case_id}:${SOLVER_VERSION}`, PLAN_TTL, () => baseline(cs)))
     }),
   )
@@ -163,8 +188,11 @@ export function createApp({ persist = true } = {}) {
     '/api/plans/:id/validate-move',
     wrap(async (req, res) => {
       const plan = await needPlan(req.params.id)
-      const cs = needCase(plan.case_id)
-      const { job_id, to_technician, position } = req.body ?? {}
+      const cs = caseFor(plan)
+      const b = V.body(req)
+      const job_id = V.id(b, 'job_id')
+      const to_technician = V.id(b, 'to_technician')
+      const position = V.integer(b, 'position', { min: 0, max: 999, required: false })
       const verdict = await cache.cached(
         cache.K.move(plan.id, plan.version, job_id, to_technician),
         MOVE_TTL,
@@ -178,8 +206,12 @@ export function createApp({ persist = true } = {}) {
     '/api/plans/:id/move',
     wrap(async (req, res) => {
       const plan = await needPlan(req.params.id)
-      const cs = needCase(plan.case_id)
-      const { job_id, to_technician, position, version } = req.body ?? {}
+      const cs = caseFor(plan)
+      const b = V.body(req)
+      const job_id = V.id(b, 'job_id')
+      const to_technician = V.id(b, 'to_technician')
+      const position = V.integer(b, 'position', { min: 0, max: 999, required: false })
+      const version = V.integer(b, 'version', { min: 0, required: false })
 
       // Optimistic concurrency: two dispatchers cannot silently clobber.
       if (typeof version === 'number' && version !== plan.version)
@@ -210,6 +242,7 @@ export function createApp({ persist = true } = {}) {
         })
       }
 
+      next.extra_jobs = plan.extra_jobs ?? []
       if (persist) await store.savePlan(next, 'manual')
       await logEvent(
         next.id,
@@ -226,23 +259,19 @@ export function createApp({ persist = true } = {}) {
     '/api/plans/:id/emergency',
     wrap(async (req, res) => {
       const plan = await needPlan(req.params.id)
-      const cs = needCase(plan.case_id)
-      const b = req.body ?? {}
-      const job = {
-        id: String(b.id || `E${Date.now().toString().slice(-5)}`),
-        area: String(b.area ?? ''),
-        skill: String(b.skill ?? '').toLowerCase(),
-        duration_minutes: Number(b.duration_minutes),
-        window_start: parseHHMM(String(b.window_start), 'window_start'),
-        window_end: parseHHMM(String(b.window_end), 'window_end'),
-      }
-      if (!Number.isFinite(job.duration_minutes) || job.duration_minutes <= 0)
-        throw new ValidationError('BAD_JOB', 'duration_minutes must be greater than 0')
+      const cs = caseFor(plan)
+      const b = V.body(req)
+      const job = V.emergencyJob(b)
+      const from = V.time(b, 'from_time', { required: false, fallback: 0 })
 
-      const from = b.from_time ? parseHHMM(String(b.from_time), 'from_time') : 0
-      // The emergency job joins the case for this plan's lifetime.
+      if (cs.jobs.some((j) => j.id === job.id))
+        throw new ValidationError('DUPLICATE_ID', `Job ${job.id} already exists in this plan.`)
+
+      // The emergency job joins the case and is persisted with the plan, so it
+      // is still there on the next request.
       const withJob = { ...cs, jobs: [...cs.jobs, job] }
       const next = insertEmergency(withJob, plan, job, from)
+      next.extra_jobs = [...(plan.extra_jobs ?? []), job]
       if (persist) await store.savePlan(next, 'emergency')
       await logEvent(
         next.id,
@@ -258,19 +287,24 @@ export function createApp({ persist = true } = {}) {
     '/api/plans/:id/sick',
     wrap(async (req, res) => {
       const plan = await needPlan(req.params.id)
-      const cs = needCase(plan.case_id)
-      const techId = String(req.body?.tech_id ?? '')
+      const cs = caseFor(plan)
+      const b = V.body(req)
+      const techId = V.id(b, 'tech_id')
       const tech = cs.technicians.find((t) => t.id === techId)
       if (!tech)
-        throw Object.assign(new Error(`Technician ${techId} is not in this case.`), { status: 404 })
-      const from = req.body?.from_time ? parseHHMM(String(req.body.from_time), 'from_time') : 0
+        throw Object.assign(new Error(`Technician ${techId} is not in this case.`), {
+          status: 404,
+          code: 'NO_TECHNICIAN',
+        })
+      const from = V.time(b, 'from_time', { required: false, fallback: 0 })
 
       const next = markSick(cs, plan, techId, from)
+      next.extra_jobs = plan.extra_jobs ?? []
       if (persist) await store.savePlan(next, 'sick')
       await logEvent(
         next.id,
         'tech_sick',
-        `${techId} ${tech.name} is off from ${req.body?.from_time ?? 'the start of the day'}; their remaining jobs were redistributed.`,
+        `${techId} ${tech.name} is off from ${b.from_time ?? 'the start of the day'}; their remaining jobs were redistributed.`,
         `${next.score.assigned}/${next.score.total_jobs} assigned · ${next.unassigned.length} unassigned`,
       )
       res.json(next)
@@ -280,7 +314,8 @@ export function createApp({ persist = true } = {}) {
   app.post(
     '/api/plans/compare',
     wrap(async (req, res) => {
-      const [a, b] = await Promise.all([needPlan(String(req.body?.a)), needPlan(String(req.body?.b))])
+      const bd = V.body(req)
+      const [a, b] = await Promise.all([needPlan(V.id(bd, 'a')), needPlan(V.id(bd, 'b'))])
       const keys = ['assigned', 'travel_minutes', 'idle_minutes', 'min_slack_minutes', 'coverage_pct', 'score']
       res.json({
         a: a.score,

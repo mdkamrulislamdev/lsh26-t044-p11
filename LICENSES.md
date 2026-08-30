@@ -1,7 +1,9 @@
-# LICENSES.md
+# Third-party licences
 
-Every framework, library, font and tool used in this project. No starter
-template, boilerplate, UI kit or purchased asset was used.
+This project's own licence is [LICENSE](./LICENSE) (MIT). This file is the
+attribution list the submission rules require: every framework, library, font
+and tool used. No starter template, boilerplate, UI kit or purchased asset was
+used.
 
 ## Frontend — runtime
 

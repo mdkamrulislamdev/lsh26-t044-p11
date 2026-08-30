@@ -20,23 +20,50 @@ try {
   /* older runtimes */
 }
 
-const url = process.env.DATABASE_URL || process.env.POSTGRES_URL
-if (!url) throw new Error('DATABASE_URL (or POSTGRES_URL) is not set')
+/**
+ * The pool is built lazily. Importing this module must never throw: /api/cases
+ * and plan generation need no database at all, and a missing or unreachable
+ * DATABASE_URL should degrade those paths to "no ledger, no persistence"
+ * rather than take the whole function down at import time.
+ */
+let _pool = null
 
-export const pool = new pg.Pool({
-  connectionString: url,
-  max: Number(process.env.PG_POOL_MAX) || 10,
-  connectionTimeoutMillis: 5000,
-  idleTimeoutMillis: 30_000,
-  ssl: url.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
-})
+export function getPool() {
+  if (_pool) return _pool
+  const url = process.env.DATABASE_URL || process.env.POSTGRES_URL
+  if (!url) return null
+  _pool = new pg.Pool({
+    connectionString: url,
+    max: Number(process.env.PG_POOL_MAX) || 10,
+    connectionTimeoutMillis: 5000,
+    idleTimeoutMillis: 30_000,
+    ssl: url.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
+  })
+  _pool.on('error', (err) =>
+    console.error(JSON.stringify({ level: 'error', msg: 'pg pool', err: err.message })),
+  )
+  return _pool
+}
 
-pool.on('error', (err) => console.error(JSON.stringify({ level: 'error', msg: 'pg pool', err: err.message })))
+export const hasDatabase = () => Boolean(process.env.DATABASE_URL || process.env.POSTGRES_URL)
 
-export const q = (text, params) => pool.query(text, params)
+class NoDatabase extends Error {
+  constructor() {
+    super('No DATABASE_URL is configured, so plans are not persisted.')
+    this.code = 'NO_DATABASE'
+  }
+}
+
+export const q = (text, params) => {
+  const p = getPool()
+  if (!p) throw new NoDatabase()
+  return p.query(text, params)
+}
 
 export async function tx(fn) {
-  const client = await pool.connect()
+  const p = getPool()
+  if (!p) throw new NoDatabase()
+  const client = await p.connect()
   try {
     await client.query('BEGIN')
     const out = await fn(client)
@@ -55,11 +82,12 @@ export async function tx(fn) {
 export async function savePlan(plan, source) {
   return tx(async (c) => {
     await c.query(
-      `insert into plans (id, case_id, version, source, solver_version, score, routes, unassigned)
-       values ($1,$2,$3,$4,$5,$6,$7,$8)
+      `insert into plans (id, case_id, version, source, solver_version, score, routes, unassigned, extra_jobs)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        on conflict (id) do update set
          version = excluded.version, source = excluded.source, score = excluded.score,
-         routes = excluded.routes, unassigned = excluded.unassigned, updated_at = now()`,
+         routes = excluded.routes, unassigned = excluded.unassigned,
+         extra_jobs = excluded.extra_jobs, updated_at = now()`,
       [
         plan.id,
         plan.case_id,
@@ -69,6 +97,7 @@ export async function savePlan(plan, source) {
         JSON.stringify(plan.score),
         JSON.stringify(plan.routes),
         JSON.stringify(plan.unassigned),
+        JSON.stringify(plan.extra_jobs ?? []),
       ],
     )
     return plan
@@ -77,7 +106,8 @@ export async function savePlan(plan, source) {
 
 export async function loadPlan(id) {
   const { rows } = await q(
-    `select id, case_id, version, solver_version, score, routes, unassigned from plans where id = $1`,
+    `select id, case_id, version, solver_version, score, routes, unassigned, extra_jobs
+     from plans where id = $1`,
     [id],
   )
   if (!rows.length) return null
@@ -91,6 +121,7 @@ export async function loadPlan(id) {
     score: r.score,
     routes: r.routes,
     unassigned: r.unassigned,
+    extra_jobs: r.extra_jobs ?? [],
   }
 }
 
@@ -124,6 +155,7 @@ export async function listEvents(planId, limit = 100) {
 }
 
 export async function ping() {
+  if (!hasDatabase()) return false
   const { rows } = await q('select 1 as ok')
   return rows[0].ok === 1
 }
