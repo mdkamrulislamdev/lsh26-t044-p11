@@ -145,3 +145,56 @@ export function Gain({ plan, baseline }: { plan: Plan; baseline: Plan }) {
     </section>
   )
 }
+
+/**
+ * Bonus 3: the dispatcher's edited plan measured against the one the optimiser
+ * produced. Only shown once the plan has actually diverged — an unchanged plan
+ * comparing to itself is noise.
+ */
+export function Compare({ current, generated }: { current: Plan; generated: Plan }) {
+  const rows: Array<[string, number, number, 'up' | 'down']> = [
+    ['Assigned', generated.score.assigned, current.score.assigned, 'up'],
+    ['Travel minutes', generated.score.travel_minutes, current.score.travel_minutes, 'down'],
+    ['Idle minutes', generated.score.idle_minutes, current.score.idle_minutes, 'down'],
+    ['Tightest slack', generated.score.min_slack_minutes, current.score.min_slack_minutes, 'up'],
+    ['Score', generated.score.score, current.score.score, 'up'],
+  ]
+
+  return (
+    <section className="border border-rule bg-paper p-4">
+      <h3 className="eyebrow">Your plan vs the generated one</h3>
+      <table className="mt-3 w-full">
+        <thead>
+          <tr className="border-b border-rule text-left">
+            <th className="eyebrow pb-1 font-normal">Measure</th>
+            <th className="eyebrow pb-1 text-right font-normal">Generated</th>
+            <th className="eyebrow pb-1 text-right font-normal">Now</th>
+            <th className="eyebrow pb-1 text-right font-normal">Change</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(([name, was, now, goodDirection]) => {
+            const delta = now - was
+            const worse = delta !== 0 && (goodDirection === 'up' ? delta < 0 : delta > 0)
+            return (
+              <tr key={name} className="border-b border-rule last:border-b-0">
+                <td className="py-1.5 text-[13px]">{name}</td>
+                <td className="mono py-1.5 text-right text-[13px] text-muted">{was}</td>
+                <td className="mono py-1.5 text-right text-[13px]">{now}</td>
+                <td
+                  className="mono py-1.5 text-right text-[13px]"
+                  style={worse ? { color: 'var(--color-flag)' } : undefined}
+                >
+                  {delta === 0 ? '—' : `${delta > 0 ? '+' : ''}${delta}`}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+      <p className="mt-2 text-[12px] text-muted">
+        Red marks a measure your edits made worse against the stated goal.
+      </p>
+    </section>
+  )
+}

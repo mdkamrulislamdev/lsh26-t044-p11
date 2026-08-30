@@ -1,3 +1,4 @@
+import { useDraggable } from '@dnd-kit/core'
 import type { CaseDetail, Job, Plan, Rejection, Technician } from '../api/types'
 import { dur, hhmm } from '../lib/time'
 
@@ -23,41 +24,54 @@ export function MetricStrip({ plan }: { plan: Plan }) {
   )
 }
 
+function UnassignedRow({ r, job }: { r: Rejection; job?: Job }) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: r.job_id })
+  return (
+    <li
+      ref={setNodeRef}
+      {...listeners}
+      {...attributes}
+      className={`border-b border-rule px-4 py-3 last:border-b-0 ${isDragging ? 'opacity-40' : ''}`}
+      style={{ cursor: 'grab' }}
+      title="Drag onto a technician to try placing it"
+    >
+      <div className="flex flex-wrap items-baseline gap-x-3">
+        <span className="mono text-[13px] font-medium">{r.job_id}</span>
+        {job && (
+          <span className="text-[12px] text-muted">
+            {job.area} · {job.skill} · {dur(job.duration_minutes)} ·{' '}
+            <span className="mono">
+              {hhmm(job.window_start)}–{hhmm(job.window_end)}
+            </span>
+          </span>
+        )}
+      </div>
+      <p className="mt-1 text-[13px] leading-[18px]">
+        <span className="mono text-[11px]" style={{ color: 'var(--color-flag)' }}>
+          {r.code}
+        </span>
+        <span> — {r.message}</span>
+      </p>
+    </li>
+  )
+}
+
 export function Unassigned({ items, jobs }: { items: Rejection[]; jobs: Map<string, Job> }) {
   return (
     <section className="border border-rule bg-paper">
       <header className="flex items-baseline gap-3 border-b border-rule px-4 py-3">
         <h2 className="eyebrow">Unassigned — {items.length}</h2>
-        <p className="text-[12px] text-muted">Each one names the rule that blocked it.</p>
+        <p className="text-[12px] text-muted">
+          Each one names the rule that blocked it. Drag one onto a technician to try it.
+        </p>
       </header>
       {items.length === 0 ? (
         <p className="px-4 py-4 text-[13px]">Every job is assigned.</p>
       ) : (
         <ul>
-          {items.map((r) => {
-            const j = jobs.get(r.job_id)
-            return (
-              <li key={r.job_id} className="border-b border-rule px-4 py-3 last:border-b-0">
-                <div className="flex flex-wrap items-baseline gap-x-3">
-                  <span className="mono text-[13px] font-medium">{r.job_id}</span>
-                  {j && (
-                    <span className="text-[12px] text-muted">
-                      {j.area} · {j.skill} · {dur(j.duration_minutes)} ·{' '}
-                      <span className="mono">
-                        {hhmm(j.window_start)}–{hhmm(j.window_end)}
-                      </span>
-                    </span>
-                  )}
-                </div>
-                <p className="mt-1 text-[13px] leading-[18px]">
-                  <span className="mono text-[11px]" style={{ color: 'var(--color-flag)' }}>
-                    {r.code}
-                  </span>
-                  <span> — {r.message}</span>
-                </p>
-              </li>
-            )
-          })}
+          {items.map((r) => (
+            <UnassignedRow key={r.job_id} r={r} job={jobs.get(r.job_id)} />
+          ))}
         </ul>
       )}
     </section>

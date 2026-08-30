@@ -26,17 +26,29 @@ The API applies its migrations on boot, so there is no separate setup step.
 ### Run the tests
 
 ```bash
-docker compose run --rm test
+docker compose run --rm --build test
 ```
 
-**172 tests.** They need no database and no network — the rule engine and solver
-are pure, so this runs offline and in CI. Add `-e FORCE_COLOR=1` if your terminal
+**212 tests** across three suites. They need no database and no network — the
+rule engine, solver and HTTP layer are all exercised in-process — so this runs
+offline and in CI.
+
+Keep the `--build`. Without it Compose reuses the image from the last build and
+silently runs an older copy of the tests. Add `-e FORCE_COLOR=1` if your terminal
 strips the colour.
 
 ```bash
-docker compose run --rm test node --test --test-reporter=spec test/golden.test.js   # the 25 public cases
-docker compose run --rm test node --test --test-reporter=spec test/edge.test.js     # our own edge cases
-docker compose run --rm test node --test --test-name-pattern="manual move"          # one behaviour
+# the 25 public cases: feasibility, reasons, determinism, scripted moves
+docker compose run --rm --build test node --test --test-reporter=spec test/golden.test.js
+
+# our own cases: malformed input, degenerate shapes, replanning
+docker compose run --rm --build test node --test --test-reporter=spec test/edge.test.js
+
+# the API over HTTP: validation, 409s, emergency persistence, sick accounting
+docker compose run --rm --build test node --test --test-reporter=spec test/api.test.js
+
+# one behaviour by name
+docker compose run --rm --build test node --test --test-name-pattern="manual move"
 ```
 
 ### Frontend with hot reload
@@ -81,7 +93,7 @@ Full diagrams and the reasoning behind the structure: **[ARCHITECTURE.md](./ARCH
 skills, shift windows, home areas, and the authoritative area-to-area travel
 table. Validated at ingest; nothing is hardcoded to a case size.
 
-> `docker compose run --rm test node --test --test-name-pattern="brief minimums"`
+> `docker compose run --rm --build test node --test --test-name-pattern="brief minimums"`
 
 ### AT2 — assignment that respects the hard rules, and one stated goal
 
@@ -97,7 +109,7 @@ Every generated plan is checked against the same engine that built it, on all 25
 cases, and compared to a naive baseline (jobs in id order to the first technician
 who can legally take them). The board shows the delta.
 
-> `docker compose run --rm test node --test --test-name-pattern="feasible|beats the naive"`
+> `docker compose run --rm --build test node --test --test-name-pattern="feasible|beats the naive"`
 
 ### AT3 — the timeline, and the unassigned list
 
@@ -114,7 +126,7 @@ and 90 min does not fit before 15:00.
 
 Assigned + unassigned always accounts for every job, with no job in both.
 
-> `docker compose run --rm test node --test --test-name-pattern="silently dropped|planted"`
+> `docker compose run --rm --build test node --test --test-name-pattern="silently dropped|planted"`
 
 ### AT4 — the manual move
 
@@ -134,7 +146,7 @@ WINDOW_LATE    — Habib reaches Gulshan at 13:25, but J16 takes 1h 15m and must
 
 Note it names the **knock-on** effect too, not just the first rule.
 
-> `docker compose run --rm test node --test --test-name-pattern="scripted manual_move|never changes the plan|always agree"`
+> `docker compose run --rm --build test node --test --test-name-pattern="scripted manual_move|never changes the plan|always agree"`
 
 ### Bonus
 

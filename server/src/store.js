@@ -82,11 +82,12 @@ export async function tx(fn) {
 export async function savePlan(plan, source) {
   return tx(async (c) => {
     await c.query(
-      `insert into plans (id, case_id, version, source, solver_version, score, routes, unassigned)
-       values ($1,$2,$3,$4,$5,$6,$7,$8)
+      `insert into plans (id, case_id, version, source, solver_version, score, routes, unassigned, extra_jobs)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        on conflict (id) do update set
          version = excluded.version, source = excluded.source, score = excluded.score,
-         routes = excluded.routes, unassigned = excluded.unassigned, updated_at = now()`,
+         routes = excluded.routes, unassigned = excluded.unassigned,
+         extra_jobs = excluded.extra_jobs, updated_at = now()`,
       [
         plan.id,
         plan.case_id,
@@ -96,6 +97,7 @@ export async function savePlan(plan, source) {
         JSON.stringify(plan.score),
         JSON.stringify(plan.routes),
         JSON.stringify(plan.unassigned),
+        JSON.stringify(plan.extra_jobs ?? []),
       ],
     )
     return plan
@@ -104,7 +106,8 @@ export async function savePlan(plan, source) {
 
 export async function loadPlan(id) {
   const { rows } = await q(
-    `select id, case_id, version, solver_version, score, routes, unassigned from plans where id = $1`,
+    `select id, case_id, version, solver_version, score, routes, unassigned, extra_jobs
+     from plans where id = $1`,
     [id],
   )
   if (!rows.length) return null
@@ -118,6 +121,7 @@ export async function loadPlan(id) {
     score: r.score,
     routes: r.routes,
     unassigned: r.unassigned,
+    extra_jobs: r.extra_jobs ?? [],
   }
 }
 
