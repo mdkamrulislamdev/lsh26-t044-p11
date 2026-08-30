@@ -1,0 +1,103 @@
+{
+  "_note": "SCAFFOLD — the official template ships in the participant pack (arena, 05:30 pm). Replace this file with that template and carry these values across; do not submit this shape unchecked.",
+
+  "team_id": "LSH26-T###",
+  "problem_id": "P11",
+  "event_start_code": "LSH26-8490-C900",
+  "repository": "https://github.com/Nezent/p2",
+  "live_url": "",
+  "commit_sha": "",
+
+  "stack": {
+    "frontend": "React 19, TypeScript, Vite, Tailwind v4",
+    "backend": "Node 20+, Express (JavaScript, ESM)",
+    "database": "Neon Postgres",
+    "cache": "Upstash Redis",
+    "hosting": "Vercel",
+    "container": "Docker Compose (multi-stage)"
+  },
+
+  "run": {
+    "setup": "cp .env.example .env  # fill DATABASE_URL and Upstash keys",
+    "start": "docker compose up --build",
+    "app_url": "http://localhost:8090",
+    "health_url": "http://localhost:8091/api/readyz",
+    "test": "docker compose run --rm test",
+    "test_count": 172,
+    "migrations": "applied automatically on API boot"
+  },
+
+  "optimisation_goal": "Maximise the number of assigned jobs; among plans with equal assignment count, minimise total technician travel minutes.",
+
+  "requirements": [
+    {
+      "id": "AT1",
+      "requirement": "At least 12 technicians and 30 jobs with skills, shifts, areas, durations and customer windows",
+      "met": true,
+      "evidence": "25 public cases seeded from the organisers' dataset, 12-16 technicians and 30-40 jobs each; area-to-area travel table used as authoritative.",
+      "where": "server/src/cases.js, server/src/cases.json",
+      "verify": "docker compose run --rm test node --test --test-name-pattern=\"brief minimums\""
+    },
+    {
+      "id": "AT2",
+      "requirement": "Assignment respecting skill, shift hours and customer window including travel, improving one stated goal",
+      "met": true,
+      "evidence": "Structural pre-screen, multi-start cheapest insertion over four fixed orderings, relocate local search. Deterministic. Every generated plan is verified feasible against the same engine that built it, on all 25 cases, and compared with a naive baseline.",
+      "where": "server/src/rules.js, server/src/solver.js",
+      "verify": "docker compose run --rm test node --test --test-name-pattern=\"feasible|beats the naive\""
+    },
+    {
+      "id": "AT3",
+      "requirement": "Per-technician timeline with jobs, travel gaps and idle time, plus unassigned jobs each naming the blocking rule",
+      "met": true,
+      "evidence": "Timeline renders service, travel and idle distinctly. Unassigned list carries a rule code and a sentence containing the actual numbers. Assigned plus unassigned always accounts for every job, with no job in both.",
+      "where": "web/src/components/Timeline.tsx, web/src/components/Panels.tsx",
+      "verify": "docker compose run --rm test node --test --test-name-pattern=\"silently dropped|planted\""
+    },
+    {
+      "id": "AT4",
+      "requirement": "Dispatcher can move a job to another technician and is immediately told whether it breaks a hard rule, naming the rule",
+      "met": true,
+      "evidence": "Drag or keyboard reassign. validate-move and move share one function, so the pre-drop preview and the drop result cannot disagree. A refused move returns 409 with the violations attached, leaves the plan untouched, and is written to the ledger. Knock-on violations on later jobs are named too.",
+      "where": "server/src/solver.js (attemptMove), server/src/app.js, web/src/App.tsx",
+      "verify": "docker compose run --rm test node --test --test-name-pattern=\"scripted manual_move|never changes the plan|always agree\""
+    }
+  ],
+
+  "bonus": [
+    {
+      "id": "B1",
+      "requirement": "Emergency job mid-day, replanning only jobs not yet started",
+      "met": true,
+      "where": "POST /api/plans/:id/emergency"
+    },
+    {
+      "id": "B2",
+      "requirement": "Technician calls in sick, redistributing their remaining jobs",
+      "met": true,
+      "where": "POST /api/plans/:id/sick"
+    },
+    {
+      "id": "B3",
+      "requirement": "Plan score, and comparison of a manual plan against the generated one",
+      "met": true,
+      "where": "score on every plan; POST /api/plans/compare; naive-baseline delta shown on the board"
+    }
+  ],
+
+  "assumptions": [
+    "A job must be fully contained in its customer window: window_start <= service_start and service_start + duration <= window_end. The brief is ambiguous about start versus finish; the stricter reading is the safer promise to a customer.",
+    "The travel table is authoritative and no distance is ever computed. An asymmetric table is accepted and used directionally, with a warning, rather than corrected.",
+    "No return-home leg is charged at the end of a shift.",
+    "A technician's first travel leg departs home_area at shift_start."
+  ],
+
+  "limitations": [
+    "Overnight shifts (shift_end <= shift_start) are rejected with INVALID_SHIFT and the technician is excluded, rather than wrapped past midnight.",
+    "Local search is relocate-only within a time budget; swap and 2-opt are not implemented. On timeout the API returns the best plan found so far with partial: true.",
+    "No authentication. Concurrent edits are detected by plan version (409 STALE_PLAN), not prevented.",
+    "web/src/mocks/planner.ts is a browser fixture for offline demos and is not the rule engine or the default path."
+  ],
+
+  "secrets": "None committed. .env is gitignored; .env.example lists only the variables the app reads."
+}

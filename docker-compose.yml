@@ -1,0 +1,64 @@
+services:
+  # Express monolith. Neon Postgres + Upstash Redis come from .env, the same
+  # variables Vercel injects in production.
+  api:
+    build:
+      context: ./server
+      target: runtime
+    env_file: .env
+    environment:
+      PORT: "8080"
+      NODE_ENV: production
+    # Docker's embedded resolver returns AAAA-only for the Neon endpoint on this
+    # host, and the bridge network has no IPv6 egress. A public resolver gives
+    # back A records, which do route.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    ports:
+      - "8091:8080"
+    restart: unless-stopped
+
+  # Production-shaped frontend: multi-stage build, static bundle on nginx,
+  # /api proxied to the monolith.
+  web:
+    build:
+      context: ./web
+      target: runtime
+    ports:
+      - "8090:8080"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # `docker compose run --rm test`
+  test:
+    profiles: ["test"]
+    build:
+      context: ./server
+      target: test
+
+  # `docker compose --profile dev up web-dev`  (Vite + HMR on :5173)
+  web-dev:
+    profiles: ["dev"]
+    build:
+      context: ./web
+      target: dev
+    environment:
+      VITE_USE_MOCK: "0"
+      VITE_API_TARGET: "http://api:8080"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./web/src:/app/src
+      - ./web/public:/app/public
+      - ./web/scripts:/app/scripts
+      - ./web/index.html:/app/index.html
+
+networks:
+  default:
+    driver: bridge
+    driver_opts:
+      # Docker Desktop's default 1500 MTU black-holes the TLS handshake to Neon
+      # from this host: TCP connects, then the larger handshake packets vanish.
+      com.docker.network.driver.mtu: "1400"
