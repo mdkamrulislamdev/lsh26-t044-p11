@@ -1,6 +1,6 @@
 # Dispatch Board — Route & Shift Assignment Optimiser
 
-**Problem:** P11 · **Team:** `LSH26-T###` *(fill in)* · **Live URL:** *(fill in)*
+**Problem:** P11 · **Team:** `LSH26-T044` · **Live:** https://p2-rho-jet.vercel.app/
 
 A dispatcher's day-plan tool for a home-service company in Dhaka. It builds the
 morning plan across 12+ technicians, refuses anything that breaks a hard rule and
@@ -181,6 +181,38 @@ ledger becomes a button in the bottom corner.
 
 ---
 
+## Approach
+
+The brief asks for a plan, but the sentence that shapes the design is the
+constraint: *"The unassigned jobs list with a reason for each one is required.
+Silence is not an answer."* A scheduler that quietly drops what it cannot place
+looks better in a screenshot and is useless to a dispatcher.
+
+The sample data confirms it. **All 25 public cases plant at least one job whose
+required skill no technician has**, 16 plant a job whose window is shorter than
+its own duration, and **19 of the 25 scripted `manual_move` entries send a job to
+a technician who lacks the skill** — the manual-move requirement is graded mostly
+on the refusal.
+
+So we built the explanation first and the optimiser second: one rule engine that
+every caller goes through, a structural pre-screen that separates "impossible
+today" from "no room left", and a board whose visual encoding is the objective
+function — idle time is the bare board showing through, so a wasteful plan reads
+as holes.
+
+### Contributions
+
+<!-- FILL IN: one line per registered member, naming what they owned. -->
+
+| Member | Major contribution |
+|---|---|
+| *(name)* | *(e.g. rule engine and solver — `server/src/rules.js`, `solver.js`)* |
+| *(name)* | *(e.g. board UI, timeline and drag interaction — `web/src/components/`)* |
+| *(name)* | *(e.g. persistence, caching, Docker and deploy)* |
+| *(name)* | *(e.g. test suites and the edge-case catalogue)* |
+
+---
+
 ## Major decisions
 
 **One rule engine, called by everything.** The solver, the manual move, the drag
@@ -222,6 +254,12 @@ Formatting happens only in the UI.
   the rule engine and is not in the default path.
 
 ---
+
+## Licence
+
+This project is MIT licensed — see [LICENSE](./LICENSE). Third-party
+attribution for every dependency, font and image is in
+[LICENSES.md](./LICENSES.md).
 
 ## Repository
 

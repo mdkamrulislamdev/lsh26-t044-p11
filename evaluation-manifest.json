@@ -1,10 +1,10 @@
 {
   "_note": "SCAFFOLD — the official template ships in the participant pack (arena, 05:30 pm). Replace this file with that template and carry these values across; do not submit this shape unchecked.",
-  "team_id": "LSH26-T###",
+  "team_id": "LSH26-T044",
   "problem_id": "P11",
   "event_start_code": "LSH26-8490-C900",
-  "repository": "https://github.com/Nezent/p2",
-  "live_url": "",
+  "repository": "https://github.com/mdkamrulislamdev/lsh26-t044",
+  "live_url": "https://p2-rho-jet.vercel.app/",
   "commit_sha": "",
   "stack": {
     "frontend": "React 19, TypeScript, Vite, Tailwind v4",
@@ -91,5 +91,6 @@
     "web/src/mocks/planner.ts is a browser fixture for offline demos and is not the rule engine or the default path.",
     "The phone layout below 900px is built and type-checked but has not been reviewed on a physical device."
   ],
-  "secrets": "None committed. .env is gitignored; .env.example lists only the variables the app reads."
+  "secrets": "None committed. .env is gitignored; .env.example lists only the variables the app reads.",
+  "approach": "README.md#approach"
 }
