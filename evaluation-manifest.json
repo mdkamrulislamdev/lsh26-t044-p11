@@ -5,7 +5,7 @@
   "event_start_code": "LSH26-8490-C900",
   "repository": "https://github.com/mdkamrulislamdev/lsh26-t044",
   "live_url": "https://p2-rho-jet.vercel.app/",
-  "commit_sha": "",
+  "commit_sha": "bca9089fa44c6f1df684b564249f22eee8f26972",
   "stack": {
     "frontend": "React 19, TypeScript, Vite, Tailwind v4",
     "backend": "Node 20+, Express (JavaScript, ESM)",
@@ -92,5 +92,6 @@
     "The phone layout below 900px is built and type-checked but has not been reviewed on a physical device."
   ],
   "secrets": "None committed. .env is gitignored; .env.example lists only the variables the app reads.",
-  "approach": "README.md#approach"
+  "approach": "README.md#approach",
+  "commit_sha_note": "The commit holding all project content. The submission form records your LAST push; re-copy `git rev-parse HEAD` if you commit again after this."
 }
