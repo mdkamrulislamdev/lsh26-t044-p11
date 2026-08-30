@@ -20,23 +20,50 @@ try {
   /* older runtimes */
 }
 
-const url = process.env.DATABASE_URL || process.env.POSTGRES_URL
-if (!url) throw new Error('DATABASE_URL (or POSTGRES_URL) is not set')
+/**
+ * The pool is built lazily. Importing this module must never throw: /api/cases
+ * and plan generation need no database at all, and a missing or unreachable
+ * DATABASE_URL should degrade those paths to "no ledger, no persistence"
+ * rather than take the whole function down at import time.
+ */
+let _pool = null
 
-export const pool = new pg.Pool({
-  connectionString: url,
-  max: Number(process.env.PG_POOL_MAX) || 10,
-  connectionTimeoutMillis: 5000,
-  idleTimeoutMillis: 30_000,
-  ssl: url.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
-})
+export function getPool() {
+  if (_pool) return _pool
+  const url = process.env.DATABASE_URL || process.env.POSTGRES_URL
+  if (!url) return null
+  _pool = new pg.Pool({
+    connectionString: url,
+    max: Number(process.env.PG_POOL_MAX) || 10,
+    connectionTimeoutMillis: 5000,
+    idleTimeoutMillis: 30_000,
+    ssl: url.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
+  })
+  _pool.on('error', (err) =>
+    console.error(JSON.stringify({ level: 'error', msg: 'pg pool', err: err.message })),
+  )
+  return _pool
+}
 
-pool.on('error', (err) => console.error(JSON.stringify({ level: 'error', msg: 'pg pool', err: err.message })))
+export const hasDatabase = () => Boolean(process.env.DATABASE_URL || process.env.POSTGRES_URL)
 
-export const q = (text, params) => pool.query(text, params)
+class NoDatabase extends Error {
+  constructor() {
+    super('No DATABASE_URL is configured, so plans are not persisted.')
+    this.code = 'NO_DATABASE'
+  }
+}
+
+export const q = (text, params) => {
+  const p = getPool()
+  if (!p) throw new NoDatabase()
+  return p.query(text, params)
+}
 
 export async function tx(fn) {
-  const client = await pool.connect()
+  const p = getPool()
+  if (!p) throw new NoDatabase()
+  const client = await p.connect()
   try {
     await client.query('BEGIN')
     const out = await fn(client)
@@ -124,6 +151,7 @@ export async function listEvents(planId, limit = 100) {
 }
 
 export async function ping() {
+  if (!hasDatabase()) return false
   const { rows } = await q('select 1 as ok')
   return rows[0].ok === 1
 }

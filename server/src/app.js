@@ -26,7 +26,7 @@ const CASE_TTL = 24 * 60 * 60
 const PLAN_TTL = 60 * 60
 const MOVE_TTL = 60
 
-export function createApp({ persist = true } = {}) {
+export function createApp({ persist = store.hasDatabase() } = {}) {
   const app = express()
   app.disable('x-powered-by')
   app.use(compression())
@@ -64,10 +64,22 @@ export function createApp({ persist = true } = {}) {
     return c
   }
 
+  // With a database, plans are loaded. Without one, the solver is deterministic,
+  // so a generated plan can be rebuilt exactly from its id — the board stays
+  // fully usable and only the ledger and manual-move persistence are lost.
   const needPlan = async (id) => {
-    const p = persist ? await store.loadPlan(id) : null
-    if (!p) throw Object.assign(new Error(`Plan ${id} is not stored.`), { status: 404, code: 'NO_PLAN' })
-    return p
+    if (persist) {
+      const stored = await store.loadPlan(id).catch(() => null)
+      if (stored) return stored
+    }
+    const caseId = String(id).replace(new RegExp(`-${SOLVER_VERSION}$`), '')
+    const cs = getCase(caseId)
+    if (!cs)
+      throw Object.assign(new Error(`Plan ${id} is not stored and cannot be rebuilt.`), {
+        status: 404,
+        code: 'NO_PLAN',
+      })
+    return solve(cs)
   }
 
   const logEvent = async (planId, kind, summary, detail, violations) => {
@@ -85,11 +97,15 @@ export function createApp({ persist = true } = {}) {
   app.get(
     '/api/readyz',
     wrap(async (_req, res) => {
+      // "not_configured" is not the same as "down". The board works without a
+      // database (deterministic rebuild) and without a cache, so neither being
+      // absent is a failure — an absent one being *unreachable* is.
       const [db, kv] = await Promise.all([
-        persist ? store.ping().catch(() => false) : Promise.resolve(true),
-        cache.ping(),
+        store.hasDatabase() ? store.ping().catch(() => false) : Promise.resolve('not_configured'),
+        cache.enabled() ? cache.ping() : Promise.resolve('not_configured'),
       ])
-      res.status(db ? 200 : 503).json({ ok: db, db, cache: kv })
+      const ok = db !== false
+      res.status(ok ? 200 : 503).json({ ok, db, cache: kv, persistence: persist })
     }),
   )
   app.get('/api/version', (_req, res) =>

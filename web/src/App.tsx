@@ -230,11 +230,32 @@ export default function App() {
 
       <div className="flex min-h-0 flex-1">
         <main className="min-w-0 flex-1 overflow-y-auto p-5">
-          {detail.isError && (
-            <p className="border border-rule bg-paper p-4 text-[13px]">
-              Can't load the case file. Check that <span className="mono">cases.json</span> is
-              served.
-            </p>
+          {(detail.isError || cases.isError) && (
+            <section className="border border-rule bg-paper p-4">
+              <h2 className="eyebrow" style={{ color: 'var(--color-flag)' }}>
+                Can't reach the planner
+              </h2>
+              <p className="mt-2 text-[13px] leading-[19px]">
+                The board needs <span className="mono">/api/cases</span>, and that request failed.
+                The 25 cases ship inside the API, so this is the service being unavailable — not
+                missing data.
+              </p>
+              <p className="mono mt-2 text-[12px] text-muted">
+                {(cases.error as Error)?.message ?? (detail.error as Error)?.message}
+              </p>
+              <p className="mt-2 text-[13px]">
+                Check <span className="mono">/api/readyz</span>. Retry once it responds.
+              </p>
+              <button
+                onClick={() => {
+                  cases.refetch()
+                  detail.refetch()
+                }}
+                className="mt-3 bg-ink px-3 py-1.5 text-[13px] font-medium text-paper"
+              >
+                Try again
+              </button>
+            </section>
           )}
           {!c && !detail.isError && (
             <p className="text-[13px] text-muted">Loading cases…</p>

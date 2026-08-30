@@ -1,11 +1,15 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { pool, q } from './store.js'
+import { getPool, hasDatabase, q } from './store.js'
 
 const dir = join(dirname(fileURLToPath(import.meta.url)), '..', 'migrations')
 
 export async function migrate() {
+  if (!hasDatabase()) {
+    console.log(JSON.stringify({ level: 'warn', msg: 'no DATABASE_URL; skipping migrations' }))
+    return
+  }
   // One boot at a time, whatever the replica count.
   await q('select pg_advisory_lock(918111)')
   try {
@@ -26,7 +30,7 @@ export async function migrate() {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   migrate()
-    .then(() => pool.end())
+    .then(() => getPool()?.end())
     .then(() => console.log('migrations ok'))
     .catch((e) => {
       console.error(e)
