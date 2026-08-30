@@ -1,0 +1,114 @@
+@import 'tailwindcss';
+
+/* ── Design tokens ───────────────────────────────────────────────────────────
+   "The board shows its holes." Service is solid, travel is hatched, idle is
+   nothing — the bare ruled ground showing through. Six colours, and exactly one
+   of them is hot: --flag means a broken hard rule and is used for nothing else.
+   ───────────────────────────────────────────────────────────────────────── */
+@theme {
+  --color-smog: #dce3e4;
+  --color-paper: #f3f6f6;
+  --color-ink: #12211e;
+  --color-service: #1f4e45;
+  --color-transit: #93a7a4;
+  --color-flag: #d8402a;
+
+  --color-rule: #12211e1a;
+  --color-rule-strong: #12211e40;
+  --color-muted: #12211e99;
+
+  --font-display: 'Archivo', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace;
+
+  --text-micro: 11px;
+  --text-fine: 13px;
+  --text-base: 15px;
+  --text-lead: 20px;
+  --text-display: 34px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--color-smog);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Signage lettering, used with restraint: page title and eyebrows only. */
+.display {
+  font-family: var(--font-display);
+  font-variation-settings: 'wdth' 118;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: -0.01em;
+}
+
+.eyebrow {
+  font-family: var(--font-display);
+  font-variation-settings: 'wdth' 112;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: var(--text-micro);
+  color: var(--color-muted);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Travel: a band you can see through, so it never competes with service. */
+.hatch {
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--color-transit) 0 1.5px,
+    transparent 1.5px 6px
+  );
+  background-color: color-mix(in srgb, var(--color-transit) 22%, transparent);
+}
+
+/* Idle is not a colour. It is the ruled ground, uncovered. */
+.ground {
+  background-color: color-mix(in srgb, var(--color-ink) 4%, var(--color-paper));
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 2px;
+}
+
+.block-move {
+  transition:
+    left 200ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    width 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-rule-strong);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
