@@ -5,7 +5,7 @@
   "event_start_code": "LSH26-8490-C900",
   "repository": "https://github.com/mdkamrulislamdev/lsh26-t044",
   "live_url": "https://p2-rho-jet.vercel.app/",
-  "commit_sha": "bca9089fa44c6f1df684b564249f22eee8f26972",
+  "commit_sha": "7ff6b3af056baf997c0ea8ec97a1d81689125170",
   "stack": {
     "frontend": "React 19, TypeScript, Vite, Tailwind v4",
     "backend": "Node 20+, Express (JavaScript, ESM)",
